@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Rocket Jump Game</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #111;
+    }
+    canvas {
+        display: block;
+        background: #222;
+    }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let W = window.innerWidth;
+let H = window.innerHeight;
+canvas.width = W;
+canvas.height = H;
+
+window.onresize = () => {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+};
+
+// ---------------------------
+// GAME OBJECTS
+// ---------------------------
+
+let player = {
+    x: 200,
+    y: 300,
+    vx: 0,
+    vy: 0,
+    radius: 20
+};
+
+let gravity = 0.4;
+let friction = 0.995;
+let maxVel = 40;
+
+let mouse = { x: 0, y: 0, down: false };
+
+// Buildings to bounce off
+let buildings = [
+    { x: 300, y: 400, w: 200, h: 40 },
+    { x: 600, y: 300, w: 200, h: 40 },
+    { x: 900, y: 450, w: 200, h: 40 },
+    { x: 1200, y: 350, w: 200, h: 40 }
+];
+
+// Goal wall
+let goal = { x: 1500, y: 0, w: 50, h: H };
+
+// ---------------------------
+// INPUT
+// ---------------------------
+
+canvas.addEventListener("mousemove", e => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+});
+
+canvas.addEventListener("mousedown", () => {
+    mouse.down = true;
+    shootRocket();
+});
+
+canvas.addEventListener("mouseup", () => mouse.down = false);
+
+// Mobile tap
+canvas.addEventListener("touchstart", e => {
+    let t = e.touches[0];
+    mouse.x = t.clientX;
+    mouse.y = t.clientY;
+    shootRocket();
+});
+
+// ---------------------------
+// ROCKET SHOOTING
+// ---------------------------
+
+function shootRocket() {
+    // Direction from player to mouse
+    let dx = mouse.x - player.x;
+    let dy = mouse.y - player.y;
+    let angle = Math.atan2(dy, dx);
+
+    // Explosion pushes opposite direction
+    let force = 25; // strong push
+    player.vx -= Math.cos(angle) * force;
+    player.vy -= Math.sin(angle) * force;
+
+    // Cap velocity
+    let speed = Math.hypot(player.vx, player.vy);
+    if (speed > maxVel) {
+        player.vx = (player.vx / speed) * maxVel;
+        player.vy = (player.vy / speed) * maxVel;
+    }
+}
+
+// ---------------------------
+// PHYSICS + COLLISION
+// ---------------------------
+
+function updatePhysics() {
+    // Apply gravity
+    player.vy += gravity;
+
+    // Apply velocity
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Friction
+    player.vx *= friction;
+    player.vy *= friction;
+
+    // Collide with buildings
+    for (let b of buildings) {
+        if (player.x + player.radius > b.x &&
+            player.x - player.radius < b.x + b.w &&
+            player.y + player.radius > b.y &&
+            player.y - player.radius < b.y + b.h) {
+
+            // Simple bounce
+            if (player.vy > 0) player.y = b.y - player.radius;
+            else player.y = b.y + b.h + player.radius;
+
+            player.vy *= -0.6;
+        }
+    }
+
+    // Collide with ground
+    if (player.y + player.radius > H) {
+        player.y = H - player.radius;
+        player.vy *= -0.6;
+    }
+
+    // Goal reached
+    if (player.x + player.radius > goal.x) {
+        alert("YOU WIN!");
+        resetGame();
+    }
+}
+
+function resetGame() {
+    player.x = 200;
+    player.y = 300;
+    player.vx = 0;
+    player.vy = 0;
+}
+
+// ---------------------------
+// DRAW
+// ---------------------------
+
+function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw buildings
+    ctx.fillStyle = "#444";
+    for (let b of buildings) {
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+
+    // Draw goal
+    ctx.fillStyle = "#00ff00";
+    ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+
+    // Draw player
+    ctx.fillStyle = "#ff4444";
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw aim line
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(player.x, player.y);
+    ctx.lineTo(mouse.x, mouse.y);
+    ctx.stroke();
+}
+
+// ---------------------------
+// GAME LOOP
+// ---------------------------
+
+function loop() {
+    updatePhysics();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
