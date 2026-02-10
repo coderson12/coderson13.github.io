@@ -1,208 +1,222 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Rocket Jump Game</title>
-<style>
+  <meta charset="UTF-8" />
+  <title>3D Rocket Jump Game</title>
+  <style>
     html, body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: #111;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
     }
     canvas {
-        display: block;
-        background: #222;
+      display: block;
     }
-</style>
+    #info {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: sans-serif;
+      font-size: 14px;
+      background: rgba(0,0,0,0.4);
+      padding: 6px 10px;
+      border-radius: 4px;
+      z-index: 10;
+    }
+  </style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<div id="info">
+  Aim with mouse, click to rocket jump.<br>
+  Reach the green wall to win. No WASD.
+</div>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-
-let W = window.innerWidth;
-let H = window.innerHeight;
-canvas.width = W;
-canvas.height = H;
-
-window.onresize = () => {
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = W;
-    canvas.height = H;
-};
-
-// ---------------------------
-// GAME OBJECTS
-// ---------------------------
-
-let player = {
-    x: 200,
-    y: 300,
-    vx: 0,
-    vy: 0,
-    radius: 20
-};
-
-let gravity = 0.4;
+let scene, camera, renderer;
+let player, playerRadius = 1;
+let velocity = new THREE.Vector3(0, 0, 0);
+let gravity = new THREE.Vector3(0, -0.25, 0);
 let friction = 0.995;
-let maxVel = 40;
+let maxSpeed = 80;
 
-let mouse = { x: 0, y: 0, down: false };
+let raycaster = new THREE.Raycaster();
+let mouse = new THREE.Vector2();
+let buildings = [];
+let goalWall;
+let clock = new THREE.Clock();
 
-// Buildings to bounce off
-let buildings = [
-    { x: 300, y: 400, w: 200, h: 40 },
-    { x: 600, y: 300, w: 200, h: 40 },
-    { x: 900, y: 450, w: 200, h: 40 },
-    { x: 1200, y: 350, w: 200, h: 40 }
-];
+init();
+animate();
 
-// Goal wall
-let goal = { x: 1500, y: 0, w: 50, h: H };
+function init() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
 
-// ---------------------------
-// INPUT
-// ---------------------------
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 5, 15);
 
-canvas.addEventListener("mousemove", e => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-});
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-canvas.addEventListener("mousedown", () => {
-    mouse.down = true;
-    shootRocket();
-});
+  // Lights
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambient);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(10, 20, 10);
+  scene.add(dir);
 
-canvas.addEventListener("mouseup", () => mouse.down = false);
+  // Ground
+  const groundGeo = new THREE.PlaneGeometry(200, 200);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = 0;
+  ground.receiveShadow = true;
+  scene.add(ground);
 
-// Mobile tap
-canvas.addEventListener("touchstart", e => {
-    let t = e.touches[0];
-    mouse.x = t.clientX;
-    mouse.y = t.clientY;
-    shootRocket();
-});
+  // Player (sphere)
+  const playerGeo = new THREE.SphereGeometry(playerRadius, 32, 32);
+  const playerMat = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+  player = new THREE.Mesh(playerGeo, playerMat);
+  player.position.set(0, playerRadius + 0.1, 0);
+  scene.add(player);
 
-// ---------------------------
-// ROCKET SHOOTING
-// ---------------------------
+  // Buildings (boxes)
+  const buildingMat = new THREE.MeshStandardMaterial({ color: 0x4444ff });
+  const positions = [
+    { x: 10, y: 2, z: -5 },
+    { x: 20, y: 3, z: 0 },
+    { x: 30, y: 4, z: 5 },
+    { x: 40, y: 5, z: -3 },
+    { x: 25, y: 3, z: -10 }
+  ];
+  positions.forEach((p, i) => {
+    const geo = new THREE.BoxGeometry(4, p.y * 2, 4);
+    const mesh = new THREE.Mesh(geo, buildingMat);
+    mesh.position.set(p.x, p.y, p.z);
+    scene.add(mesh);
+    buildings.push(mesh);
+  });
+
+  // Goal wall (green)
+  const goalGeo = new THREE.BoxGeometry(2, 20, 20);
+  const goalMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+  goalWall = new THREE.Mesh(goalGeo, goalMat);
+  goalWall.position.set(60, 10, 0);
+  scene.add(goalWall);
+
+  // Events
+  window.addEventListener("resize", onWindowResize);
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("mousedown", onMouseDown);
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onMouseMove(event) {
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+}
+
+function onMouseDown(event) {
+  shootRocket();
+}
 
 function shootRocket() {
-    // Direction from player to mouse
-    let dx = mouse.x - player.x;
-    let dy = mouse.y - player.y;
-    let angle = Math.atan2(dy, dx);
+  // Ray from camera through mouse
+  raycaster.setFromCamera(mouse, camera);
+  const dir = raycaster.ray.direction.clone().normalize();
 
-    // Explosion pushes opposite direction
-    let force = 25; // strong push
-    player.vx -= Math.cos(angle) * force;
-    player.vy -= Math.sin(angle) * force;
+  // Explosion pushes opposite direction
+  const force = 40; // strong
+  velocity.addScaledVector(dir, -force);
 
-    // Cap velocity
-    let speed = Math.hypot(player.vx, player.vy);
-    if (speed > maxVel) {
-        player.vx = (player.vx / speed) * maxVel;
-        player.vy = (player.vy / speed) * maxVel;
-    }
+  // Cap speed
+  const speed = velocity.length();
+  if (speed > maxSpeed) {
+    velocity.multiplyScalar(maxSpeed / speed);
+  }
 }
 
-// ---------------------------
-// PHYSICS + COLLISION
-// ---------------------------
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
 
-function updatePhysics() {
-    // Apply gravity
-    player.vy += gravity;
-
-    // Apply velocity
-    player.x += player.vx;
-    player.y += player.vy;
-
-    // Friction
-    player.vx *= friction;
-    player.vy *= friction;
-
-    // Collide with buildings
-    for (let b of buildings) {
-        if (player.x + player.radius > b.x &&
-            player.x - player.radius < b.x + b.w &&
-            player.y + player.radius > b.y &&
-            player.y - player.radius < b.y + b.h) {
-
-            // Simple bounce
-            if (player.vy > 0) player.y = b.y - player.radius;
-            else player.y = b.y + b.h + player.radius;
-
-            player.vy *= -0.6;
-        }
-    }
-
-    // Collide with ground
-    if (player.y + player.radius > H) {
-        player.y = H - player.radius;
-        player.vy *= -0.6;
-    }
-
-    // Goal reached
-    if (player.x + player.radius > goal.x) {
-        alert("YOU WIN!");
-        resetGame();
-    }
+  updatePhysics(dt);
+  renderer.render(scene, camera);
 }
 
-function resetGame() {
-    player.x = 200;
-    player.y = 300;
-    player.vx = 0;
-    player.vy = 0;
-}
+function updatePhysics(dt) {
+  // Apply gravity
+  velocity.addScaledVector(gravity, dt * 60);
 
-// ---------------------------
-// DRAW
-// ---------------------------
+  // Apply velocity
+  player.position.addScaledVector(velocity, dt);
 
-function draw() {
-    ctx.clearRect(0, 0, W, H);
+  // Friction
+  velocity.multiplyScalar(friction);
 
-    // Draw buildings
-    ctx.fillStyle = "#444";
-    for (let b of buildings) {
-        ctx.fillRect(b.x, b.y, b.w, b.h);
+  // Ground collision
+  if (player.position.y - playerRadius < 0) {
+    player.position.y = playerRadius;
+    if (velocity.y < 0) velocity.y *= -0.4;
+  }
+
+  // Building collisions (sphere vs AABB)
+  buildings.forEach(b => {
+    const half = new THREE.Vector3().setFromMatrixScale(b.matrixWorld).multiplyScalar(0.5);
+    const center = b.position.clone();
+
+    const closest = new THREE.Vector3(
+      clamp(player.position.x, center.x - half.x, center.x + half.x),
+      clamp(player.position.y, center.y - half.y, center.y + half.y),
+      clamp(player.position.z, center.z - half.z, center.z + half.z)
+    );
+
+    const diff = player.position.clone().sub(closest);
+    const dist = diff.length();
+
+    if (dist < playerRadius) {
+      const penetration = playerRadius - dist || playerRadius;
+      const normal = dist === 0 ? new THREE.Vector3(0, 1, 0) : diff.normalize();
+      player.position.addScaledVector(normal, penetration);
+
+      const vn = velocity.dot(normal);
+      if (vn < 0) {
+        velocity.addScaledVector(normal, -vn * 1.4);
+      }
     }
+  });
 
-    // Draw goal
-    ctx.fillStyle = "#00ff00";
-    ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+  // Goal check
+  if (player.position.x > goalWall.position.x - 1) {
+    alert("YOU REACHED THE GOAL WALL! 🎉");
+    resetPlayer();
+  }
 
-    // Draw player
-    ctx.fillStyle = "#ff4444";
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw aim line
-    ctx.strokeStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.moveTo(player.x, player.y);
-    ctx.lineTo(mouse.x, mouse.y);
-    ctx.stroke();
+  // Camera follow
+  const camOffset = new THREE.Vector3(-10, 8, 18);
+  const targetPos = player.position.clone().add(camOffset);
+  camera.position.lerp(targetPos, 0.1);
+  camera.lookAt(player.position);
 }
 
-// ---------------------------
-// GAME LOOP
-// ---------------------------
-
-function loop() {
-    updatePhysics();
-    draw();
-    requestAnimationFrame(loop);
+function resetPlayer() {
+  player.position.set(0, playerRadius + 0.1, 0);
+  velocity.set(0, 0, 0);
 }
 
-loop();
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 </script>
 </body>
 </html>
